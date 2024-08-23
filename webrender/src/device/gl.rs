@@ -4573,21 +4573,30 @@ impl<'a> TextureUploader<'a> {
             format,
         );
 
+        let bytes_pp = format.bytes_per_pixel() as usize;
+        let mut align = 0usize;
+
         // Find a pixel buffer with enough space remaining, creating a new one if required.
         let buffer_index = self.buffers.iter().position(|buffer| {
-            buffer.size_used + dst_size <= buffer.inner.pbo.reserved_size
+            let reminder = buffer.size_used % bytes_pp;
+            align = if reminder != 0 { bytes_pp - reminder } else { 0 };
+
+            buffer.size_used + dst_size + align <= buffer.inner.pbo.reserved_size
         });
         let buffer = match buffer_index {
             Some(i) => self.buffers.swap_remove(i),
-            None => PixelBuffer::new(self.pbo_pool.get_pbo(device, dst_size)?),
+            None => {
+                align = 0;
+                PixelBuffer::new(self.pbo_pool.get_pbo(device, dst_size)?)
+            }
         };
 
         if !device.capabilities.supports_nonzero_pbo_offsets {
             assert_eq!(buffer.size_used, 0, "PBO uploads from non-zero offset are not supported.");
         }
-        assert!(buffer.size_used + dst_size <= buffer.inner.pbo.reserved_size, "PixelBuffer is too small");
+        assert!(buffer.size_used + dst_size + align <= buffer.inner.pbo.reserved_size, "PixelBuffer is too small");
 
-        let offset = buffer.size_used;
+        let offset = buffer.size_used + align;
 
         Ok(UploadStagingBuffer {
             buffer,
